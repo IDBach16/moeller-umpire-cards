@@ -506,7 +506,7 @@ CARD_TEMPLATE = """<!DOCTYPE html>
           <th style="padding:10px 12px; text-align:center;">Called N</th>
           <th style="padding:10px 12px; text-align:center;">Called Strk%</th>
           <th style="padding:10px 12px; text-align:center;">Ball%</th>
-          <th style="padding:10px 12px; text-align:center;">League Avg Strk%</th>
+          <th style="padding:10px 12px; text-align:center;">Dataset Avg Strk%<br><span style="font-weight:400; font-size:10px; opacity:0.8;">All {{ league_umpires }} ump{{ 's' if league_umpires != 1 else '' }}, {{ league_called }} pitches</span></th>
         </tr>
       </thead>
       <tbody>
