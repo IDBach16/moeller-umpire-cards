@@ -494,7 +494,11 @@ CARD_TEMPLATE = """<!DOCTYPE html>
 
   <!-- ATTACK ZONE TABLE -->
   <div style="background:white; padding:24px; margin-top:2px;">
-    <h2 style="margin:0 0 12px; font-size:18px; color:{{ NAVY }};">Attack Zone Breakdown</h2>
+    <h2 style="margin:0 0 6px; font-size:18px; color:{{ NAVY }};">Attack Zone Breakdown</h2>
+    <p style="margin:0 0 12px; font-size:12px; color:#666; line-height:1.5;">
+      <b>League Avg</b> = average called strike % across all umpires in our {{ season_year }} Moeller charting data ({{ league_umpires }} umpire{{ 's' if league_umpires != 1 else '' }}, {{ league_called }} called pitches).
+      This is our dataset average, not an official league stat.
+    </p>
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
       <thead>
         <tr style="background:{{ NAVY }}; color:white;">
@@ -651,6 +655,9 @@ def umpire_card(name):
     game_rows = game_by_game(ump_data)
     tendencies = key_tendencies(summary, strike_pct, attack_rows)
 
+    league_umpires = CALLED["Umpire"].nunique()
+    league_called_n = len(CALLED)
+
     return render_template_string(
         CARD_TEMPLATE,
         umpire_name=name,
@@ -663,6 +670,9 @@ def umpire_card(name):
         count_rows=count_rows,
         game_rows=game_rows,
         tendencies=tendencies,
+        season_year=SEASON_YEAR,
+        league_umpires=league_umpires,
+        league_called=league_called_n,
         NAVY=NAVY,
     )
 
