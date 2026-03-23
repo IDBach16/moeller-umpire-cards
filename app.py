@@ -6,8 +6,9 @@ Serves HTML umpire scouting cards from Moeller pitch-by-pitch data.
 import os
 import subprocess
 from datetime import datetime
+from pathlib import Path
 import pandas as pd
-from flask import Flask, render_template_string, redirect, url_for, jsonify
+from flask import Flask, render_template_string, redirect, url_for, jsonify, send_file
 
 app = Flask(__name__)
 
@@ -374,9 +375,15 @@ CARD_TEMPLATE = """<!DOCTYPE html>
   <a href="/" style="display:inline-block; margin-bottom:12px; color:{{ NAVY }}; text-decoration:none; font-weight:600;">&larr; Back to Umpire List</a>
 
   <!-- HEADER -->
-  <div style="background:{{ NAVY }}; color:white; padding:24px 32px; border-radius:8px 8px 0 0; text-align:center;">
-    <h1 style="margin:0; font-size:32px; letter-spacing:1px;">{{ umpire_name }}</h1>
-    <p style="margin:8px 0 0; font-size:16px; opacity:0.85;">{{ games }} Game{{ 's' if games != 1 else '' }} &nbsp;|&nbsp; {{ summary.called }} Called Pitches</p>
+  <div style="background:{{ NAVY }}; color:white; padding:24px 32px; border-radius:8px 8px 0 0; position:relative;">
+    <div style="text-align:center;">
+      <h1 style="margin:0; font-size:32px; letter-spacing:1px;">{{ umpire_name }}</h1>
+      <p style="margin:8px 0 0; font-size:16px; opacity:0.85;">{{ games }} Game{{ 's' if games != 1 else '' }} &nbsp;|&nbsp; {{ summary.called }} Called Pitches</p>
+    </div>
+    <a id="export-btn" href="/api/export/{{ umpire_name }}" style="position:absolute; top:24px; right:32px; background:white; color:{{ NAVY }}; text-decoration:none; padding:10px 18px; border-radius:6px; font-size:13px; font-weight:700; letter-spacing:0.5px; display:inline-flex; align-items:center; gap:6px; transition:opacity 0.2s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ NAVY }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export PNG
+    </a>
   </div>
 
   <!-- SUMMARY BAR -->
@@ -674,6 +681,39 @@ def umpire_card(name):
         league_umpires=league_umpires,
         league_called=league_called_n,
         NAVY=NAVY,
+    )
+
+
+@app.route("/api/export/<name>")
+def export_card(name):
+    """Generate the umpire card PNG via umpire_card.py and serve it as a download."""
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(app_dir, "output")
+    safe_name = name.replace(" ", "_")
+    png_path = os.path.join(output_dir, f"Umpire_{safe_name}.png")
+
+    # Run umpire_card.py to generate/refresh the PNG
+    python_exe = r"C:\Users\IDBac\AppData\Local\Programs\Python\Python313\python.exe"
+    try:
+        result = subprocess.run(
+            [python_exe, "umpire_card.py", "--umpire", name],
+            cwd=app_dir, capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0 and not os.path.exists(png_path):
+            return jsonify({"error": "Card generation failed", "detail": result.stderr}), 500
+    except Exception as e:
+        # If generation fails but a cached PNG exists, serve that
+        if not os.path.exists(png_path):
+            return jsonify({"error": str(e)}), 500
+
+    if not os.path.exists(png_path):
+        return jsonify({"error": f"PNG not found for {name}"}), 404
+
+    return send_file(
+        png_path,
+        mimetype="image/png",
+        as_attachment=True,
+        download_name=f"Umpire_{safe_name}.png",
     )
 
 
