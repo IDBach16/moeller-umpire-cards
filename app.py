@@ -77,6 +77,92 @@ def called_strk_pct(subset):
     return strikes / total * 100
 
 
+def compute_grade(called):
+    """Compute a single letter grade (A-F) for an umpire.
+
+    Based on:
+      - Heart zone correctness: pitches in the middle should be called strikes
+      - Waste zone correctness: pitches way outside should be called balls
+      - Shadow zone leniency (partial credit)
+      - Consistency penalty for game-to-game drift
+
+    Returns a dict: {"letter": "B+", "score": 87.4, "color": "#...",
+                      "heart_acc": 93.2, "waste_acc": 96.1, "consistency": 6.2}
+    """
+    if len(called) == 0:
+        return {"letter": "—", "score": 0, "color": "#888888",
+                "heart_acc": 0, "waste_acc": 0, "consistency": 0,
+                "n_clear": 0}
+
+    heart = called[called["AttackZone"] == "Heart"]
+    waste = called[called["AttackZone"] == "Waste"]
+
+    heart_n = len(heart)
+    waste_n = len(waste)
+    heart_strk = (heart["PitchResult"] == "Strike Looking").sum()
+    waste_ball = (waste["PitchResult"] == "Ball").sum()
+
+    # Clear-cut call accuracy: heart strikes + waste balls / total clear calls
+    n_clear = heart_n + waste_n
+    heart_acc = (heart_strk / heart_n * 100) if heart_n else 0
+    waste_acc = (waste_ball / waste_n * 100) if waste_n else 0
+
+    if n_clear == 0:
+        return {"letter": "—", "score": 0, "color": "#888888",
+                "heart_acc": 0, "waste_acc": 0, "consistency": 0,
+                "n_clear": 0}
+
+    clear_acc = ((heart_strk + waste_ball) / n_clear) * 100
+
+    # Consistency penalty — game-to-game called strike % drift
+    game_dates = called["Date"].dt.date.dropna().unique()
+    game_rates = []
+    for gd in game_dates:
+        gdata = called[called["Date"].dt.date == gd]
+        if len(gdata) >= 5:
+            rate = (gdata["PitchResult"] == "Strike Looking").sum() / len(gdata) * 100
+            game_rates.append(rate)
+
+    import numpy as _np
+    std = float(_np.std(game_rates)) if len(game_rates) >= 2 else 0
+    # Penalty: 0 if std <= 5%, up to -4 if std >= 13%
+    consistency_penalty = max(0, min(4, (std - 5) * 0.5))
+
+    score = clear_acc - consistency_penalty
+
+    # Letter grade mapping
+    if score >= 93:
+        letter, color = "A", "#2e7d32"
+    elif score >= 90:
+        letter, color = "A-", "#388e3c"
+    elif score >= 87:
+        letter, color = "B+", "#558b2f"
+    elif score >= 83:
+        letter, color = "B", "#689f38"
+    elif score >= 80:
+        letter, color = "B-", "#827717"
+    elif score >= 77:
+        letter, color = "C+", "#f9a825"
+    elif score >= 73:
+        letter, color = "C", "#f57f17"
+    elif score >= 70:
+        letter, color = "C-", "#ef6c00"
+    elif score >= 65:
+        letter, color = "D", "#e65100"
+    else:
+        letter, color = "F", "#c62828"
+
+    return {
+        "letter": letter,
+        "score": round(score, 1),
+        "color": color,
+        "heart_acc": round(heart_acc, 1),
+        "waste_acc": round(waste_acc, 1),
+        "consistency": round(std, 1),
+        "n_clear": n_clear,
+    }
+
+
 def compute_summary(called):
     total = len(called)
     strk = (called["PitchResult"] == "Strike Looking").sum()
@@ -229,60 +315,127 @@ def game_by_game(called):
 
 
 def key_tendencies(summary, strike_pct, attack_rows):
-    """Auto-generate bullet points."""
+    """Auto-generate bullet points.
+
+    Each bullet tagged with who it applies to (PITCHER or HITTER) and uses
+    plain-language descriptions instead of jargon like Shadow/Chase/Waste.
+    """
     bullets = []
+    P = "<span style='color:#1565c0;font-weight:700;'>PITCHER:</span>"
+    H = "<span style='color:#c62828;font-weight:700;'>HITTER:</span>"
 
-    # Zone width
+    # Zone width — based on borderline (Shadow) zone calls
     if summary["shadow_pct"] >= 45:
-        bullets.append("<b>WIDE ZONE:</b> Calls strikes on shadow pitches at a high rate ({:.1f}%). Be aggressive on borderline pitches.".format(summary["shadow_pct"]))
+        bullets.append(
+            f"{P} <b>WIDE ZONE</b> — borderline pitches called strikes {summary['shadow_pct']:.0f}% "
+            f"of the time. Attack the edges."
+        )
+        bullets.append(
+            f"{H} <b>DON'T TAKE CLOSE PITCHES</b> — with a wide zone ({summary['shadow_pct']:.0f}% "
+            f"on borderline), anything near the plate is a strike. Swing."
+        )
     elif summary["shadow_pct"] <= 30:
-        bullets.append("<b>TIGHT ZONE:</b> Rarely calls strikes on shadow pitches ({:.1f}%). Take borderline pitches — they'll likely be balls.".format(summary["shadow_pct"]))
+        bullets.append(
+            f"{P} <b>TIGHT ZONE</b> — borderline pitches only called strikes {summary['shadow_pct']:.0f}% "
+            f"of the time. Don't live on the edges — work inside the zone."
+        )
+        bullets.append(
+            f"{H} <b>BE PATIENT</b> — close pitches go your way ({summary['shadow_pct']:.0f}% strike "
+            f"rate on borderline). Take anything off the plate."
+        )
     else:
-        bullets.append("<b>AVERAGE ZONE:</b> Shadow called strike rate is {:.1f}% (near league average).".format(summary["shadow_pct"]))
+        bullets.append(
+            f"<b>AVERAGE ZONE</b> — borderline strike rate of {summary['shadow_pct']:.0f}% "
+            f"is near league norm. No strong edge either way."
+        )
 
-    # Chase expansion
+    # Chase / off-plate expansion
     if summary["chase_pct"] >= 20:
-        bullets.append("<b>EXPANDS:</b> Chase pitches get called strikes {:.1f}% of the time. Protect the plate — pitches just off may be called.".format(summary["chase_pct"]))
-    else:
-        bullets.append("<b>DOESN'T EXPAND:</b> Chase strike rate only {:.1f}%. Pitches off the plate will be called balls. Stay in the zone.".format(summary["chase_pct"]))
+        bullets.append(
+            f"{P} <b>EXPANDS OFF THE PLATE</b> — pitches clearly off the plate called strikes "
+            f"{summary['chase_pct']:.0f}% of the time. You can work just off the edge."
+        )
+        bullets.append(
+            f"{H} <b>PROTECT THE PLATE</b> — this ump rings up off-plate pitches "
+            f"({summary['chase_pct']:.0f}%). Expand your swing with 2 strikes."
+        )
+    elif summary["chase_pct"] <= 8:
+        bullets.append(
+            f"{P} <b>STAY IN THE ZONE</b> — pitches off the plate called balls {100 - summary['chase_pct']:.0f}% "
+            f"of the time. Don't waste pitches trying to expand."
+        )
 
-    # Heart consistency
+    # Heart (pitches right down the middle)
     if summary["heart_pct"] >= 90:
-        bullets.append("<b>CONSISTENT HEART:</b> {:.1f}% called strike rate on pitches over the middle. Very reliable.".format(summary["heart_pct"]))
+        bullets.append(
+            f"<b>CONSISTENT ON THE MIDDLE</b> — {summary['heart_pct']:.0f}% called strike rate on "
+            f"pitches down the middle. What you see is what you get."
+        )
     elif summary["heart_pct"] < 80:
-        bullets.append("<b>MISSES HEART:</b> Only {:.1f}% called strike rate in the heart. May get some favorable calls on middle pitches.".format(summary["heart_pct"]))
+        bullets.append(
+            f"{H} <b>OCCASIONAL HEART MISSES</b> — this ump only calls "
+            f"{summary['heart_pct']:.0f}% of middle-zone pitches strikes. You may get a few free ones."
+        )
 
-    # Corner analysis (zones 1,3,7,9 — corners of the 3x3 grid)
+    # Corners (zones 1,3,7,9)
     corners = [strike_pct.get(z) for z in [1, 3, 7, 9] if strike_pct.get(z) is not None]
     if corners:
         avg_corner = sum(corners) / len(corners)
         if avg_corner >= 50:
-            bullets.append("<b>GIVES CORNERS:</b> Average corner called strike rate is {:.1f}%. Pitchers can work the edges.".format(avg_corner))
+            bullets.append(
+                f"{P} <b>CORNERS ARE YOURS</b> — average corner called strike rate "
+                f"{avg_corner:.0f}%. Paint the edges all day."
+            )
         elif avg_corner < 35:
-            bullets.append("<b>TIGHT CORNERS:</b> Average corner called strike rate is only {:.1f}%. Work middle-in/middle-away instead.".format(avg_corner))
+            bullets.append(
+                f"{P} <b>NO CORNER CALLS</b> — corner strike rate only {avg_corner:.0f}%. "
+                f"Work middle-in or middle-away, not black-of-the-plate."
+            )
 
-    # Top vs bottom
+    # Top vs bottom (tall vs short zone)
     top = [strike_pct.get(z) for z in [1, 2, 3] if strike_pct.get(z) is not None]
     bot = [strike_pct.get(z) for z in [7, 8, 9] if strike_pct.get(z) is not None]
     if top and bot:
         avg_top = sum(top) / len(top)
         avg_bot = sum(bot) / len(bot)
         diff = avg_top - avg_bot
-        if abs(diff) >= 10:
-            if diff > 0:
-                bullets.append("<b>FAVORS HIGH:</b> Top row {:.1f}% vs bottom row {:.1f}%. Elevate with fastballs.".format(avg_top, avg_bot))
-            else:
-                bullets.append("<b>FAVORS LOW:</b> Bottom row {:.1f}% vs top row {:.1f}%. Attack the bottom of the zone.".format(avg_bot, avg_top))
+        if diff >= 10:
+            bullets.append(
+                f"{P} <b>HIGH STRIKE</b> — top of zone called strikes {avg_top:.0f}% vs bottom "
+                f"{avg_bot:.0f}%. Elevate the fastball."
+            )
+            bullets.append(
+                f"{H} <b>WATCH FOR HIGH HEAT</b> — this ump calls high strikes ({avg_top:.0f}%). "
+                f"Don't let elevated fastballs beat you."
+            )
+        elif diff <= -10:
+            bullets.append(
+                f"{P} <b>LOW STRIKE</b> — bottom of zone called strikes {avg_bot:.0f}% vs top "
+                f"{avg_top:.0f}%. Work down in the zone."
+            )
+            bullets.append(
+                f"{H} <b>WATCH LOW PITCHES</b> — low strike zone is active ({avg_bot:.0f}%). "
+                f"Don't take borderline sinkers/curves."
+            )
 
-    # Waste
+    # Waste (pitches way off the plate)
     if summary["waste_pct"] >= 10:
-        bullets.append("Caution: calls strikes on waste pitches at {:.1f}% — well off the plate.".format(summary["waste_pct"]))
+        bullets.append(
+            f"{H} <b>UMP MAKES MISTAKES</b> — called {summary['waste_pct']:.0f}% of way-off-the-plate "
+            f"pitches strikes. Be ready to swing at anything close with 2 strikes."
+        )
 
-    # FPS
+    # First-pitch strike tendency
     if summary["fps_pct"] >= 45:
-        bullets.append("Hitter-unfriendly on first pitch — {:.1f}% called strike rate on 0-0 counts.".format(summary["fps_pct"]))
+        bullets.append(
+            f"{H} <b>DON'T TAKE PITCH 1</b> — {summary['fps_pct']:.0f}% first-pitch strike rate. "
+            f"Get ready to hit from the start."
+        )
     elif summary["fps_pct"] <= 30:
-        bullets.append("Favorable to hitters on first pitch — only {:.1f}% called strike rate on 0-0.".format(summary["fps_pct"]))
+        bullets.append(
+            f"{P} <b>FIRST-PITCH BALL RISK</b> — only {summary['fps_pct']:.0f}% of 0-0 pitches "
+            f"called strikes. Make sure pitch 1 is a strike."
+        )
 
     return bullets
 
@@ -375,9 +528,16 @@ CARD_TEMPLATE = """<!DOCTYPE html>
 
   <!-- HEADER -->
   <div style="background:{{ NAVY }}; color:white; padding:24px 32px; border-radius:8px 8px 0 0; position:relative;">
-    <div style="text-align:center;">
-      <h1 style="margin:0; font-size:32px; letter-spacing:1px;">{{ umpire_name }}</h1>
-      <p style="margin:8px 0 0; font-size:16px; opacity:0.85;">{{ games }} Game{{ 's' if games != 1 else '' }} &nbsp;|&nbsp; {{ summary.called }} Called Pitches</p>
+    <div style="display:flex; align-items:center; justify-content:center; gap:24px;">
+      <!-- GRADE BADGE -->
+      <div style="background:{{ grade.color }}; color:white; width:88px; height:88px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,0.3); flex-shrink:0;" title="Overall grade — Heart {{ grade.heart_acc }}%, Waste {{ grade.waste_acc }}%, Consistency {{ grade.consistency }}% std">
+        <div style="font-size:38px; font-weight:900; line-height:1;">{{ grade.letter }}</div>
+        <div style="font-size:10px; opacity:0.9; margin-top:2px; letter-spacing:0.5px;">{{ grade.score }}</div>
+      </div>
+      <div style="text-align:center;">
+        <h1 style="margin:0; font-size:32px; letter-spacing:1px;">{{ umpire_name }}</h1>
+        <p style="margin:8px 0 0; font-size:16px; opacity:0.85;">{{ games }} Game{{ 's' if games != 1 else '' }} &nbsp;|&nbsp; {{ summary.called }} Called Pitches</p>
+      </div>
     </div>
     <button id="export-btn" onclick="exportCard()" style="position:absolute; top:24px; right:32px; background:white; color:{{ NAVY }}; border:none; padding:10px 18px; border-radius:6px; font-size:13px; font-weight:700; letter-spacing:0.5px; display:inline-flex; align-items:center; gap:6px; cursor:pointer; transition:opacity 0.2s;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ NAVY }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -653,6 +813,7 @@ def umpire_card(name):
 
     games = ump_data["Date"].nunique()
     summary = compute_summary(ump_data)
+    grade = compute_grade(ump_data)
 
     summary_items = [
         {"label": "Called Pitches", "value": summary["called"]},
@@ -709,6 +870,7 @@ def umpire_card(name):
         umpire_name=name,
         games=games,
         summary=summary,
+        grade=grade,
         summary_items=summary_items,
         grids=grids,
         az_colors=az_colors,
