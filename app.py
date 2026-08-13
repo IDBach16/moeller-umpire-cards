@@ -24,19 +24,29 @@ SHEET_NAME = "Moeller_2024_2025_Final_Season"
 
 NAVY = "#1a1a2e"
 
-SEASON_YEAR = 2026
+# SEASON_YEAR used to be hardcoded to 2026, which meant this card would have kept
+# showing 2026 forever. Derive it from the data instead: the latest season that
+# actually has pitches. Using the calendar year would show an empty card every
+# January, before the new season starts.
+SEASON_YEAR = None  # set by load_data()
+
 
 def load_data():
+    global SEASON_YEAR
     df = pd.read_excel(EXCEL_PATH, sheet_name=SHEET_NAME)
-    df["Date"] = pd.to_datetime(df["Date"])
+    df["Date"] = pd.to_datetime(df["Date"], format="mixed", errors="coerce")
+    df = df[df["Date"].notna()]
+    years = df["Date"].dt.year
+    SEASON_YEAR = int(years.max()) if len(years) else pd.Timestamp.today().year
     # Filter to season year
-    df = df[df["Date"].dt.year == SEASON_YEAR]
+    df = df[years == SEASON_YEAR]
     # Called pitches only
     called = df[df["PitchResult"].isin(["Strike Looking", "Ball"])].copy()
     return df, called
 
 
 DF_ALL, CALLED = load_data()
+print(f"  Umpire Card: season {SEASON_YEAR}, {len(DF_ALL)} pitches, {len(CALLED)} called")
 
 
 # ---------------------------------------------------------------------------
