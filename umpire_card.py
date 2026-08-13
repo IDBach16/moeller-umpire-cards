@@ -34,11 +34,26 @@ warnings.filterwarnings("ignore")
 # ---------------------------------------------------------------------------
 # PATHS
 # ---------------------------------------------------------------------------
-BASE_DIR = Path(r"C:\Users\IDBac\OneDrive\Desktop\Moeller\Umpire_Card")
+BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR / "Moeller_2024_2025_2026_Final_Season.xlsx"
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-LOGO_PATH = Path(r"C:\Users\IDBac\OneDrive\Desktop\Moeller\Pitcher_Card\shield_new.png")
+
+
+def _find_logo():
+    """Prefer this app's own copy; fall back to Pitcher_Card next door.
+
+    This used to be an absolute path into Pitcher_Card, which broke if the
+    folder moved and could never resolve on Railway. Every use of LOGO_PATH is
+    guarded by .exists(), so a missing logo just means no logo, never a crash.
+    """
+    local = BASE_DIR / "shield_new.png"
+    if local.exists():
+        return local
+    return BASE_DIR.parent / "Pitcher_Card" / "shield_new.png"
+
+
+LOGO_PATH = _find_logo()
 
 # ---------------------------------------------------------------------------
 # CONSTANTS
