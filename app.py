@@ -14,8 +14,12 @@ app = Flask(__name__)
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-EXCEL_PATH = os.path.join(os.path.dirname(__file__),
-                          "Moeller_2024_2025_2026_Final_Season.xlsx")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+# Prefer the combined all-seasons file the pipeline builds; fall back to the
+# original when absent, so this is a no-op until distribute.py has run.
+_COMBINED = os.path.join(_HERE, "Moeller_All_Seasons.xlsx")
+EXCEL_PATH = _COMBINED if os.path.exists(_COMBINED) else os.path.join(
+    _HERE, "Moeller_2024_2025_2026_Final_Season.xlsx")
 SHEET_NAME = "Moeller_2024_2025_Final_Season"
 
 NAVY = "#1a1a2e"

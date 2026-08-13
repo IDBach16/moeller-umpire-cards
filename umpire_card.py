@@ -35,7 +35,8 @@ warnings.filterwarnings("ignore")
 # PATHS
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
-EXCEL_PATH = BASE_DIR / "Moeller_2024_2025_2026_Final_Season.xlsx"
+_COMBINED = BASE_DIR / "Moeller_All_Seasons.xlsx"
+EXCEL_PATH = _COMBINED if _COMBINED.exists() else BASE_DIR / "Moeller_2024_2025_2026_Final_Season.xlsx"
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
